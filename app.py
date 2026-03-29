@@ -12,75 +12,43 @@ import mediapipe as mp
 from model import KeyPointClassifier
 from model import PointHistoryClassifier
 
-
+# [ЭНД ГАР ХҮРЭХГҮЙ] - Хуучин функцууд хэвээрээ
 def get_args():
     parser = argparse.ArgumentParser()
-
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--width", help='cap width', type=int, default=960)
     parser.add_argument("--height", help='cap height', type=int, default=540)
-
     parser.add_argument('--use_static_image_mode', action='store_true')
-    parser.add_argument("--min_detection_confidence",
-                        help='min_detection_confidence',
-                        type=float,
-                        default=0.7)
-    parser.add_argument("--min_tracking_confidence",
-                        help='min_tracking_confidence',
-                        type=int,
-                        default=0.5)
-    args = parser.parse_args()
-
-    return args
+    parser.add_argument("--min_detection_confidence", type=float, default=0.7)
+    parser.add_argument("--min_tracking_confidence", type=int, default=0.5)
+    return parser.parse_args()
 
 def main():
     args = get_args()
-
-    cap_device = args.device
-    cap_width = args.width
-    cap_height = args.height
-
-    use_static_image_mode = args.use_static_image_mode
-    min_detection_confidence = args.min_detection_confidence
-    min_tracking_confidence = args.min_tracking_confidence
-
-    cap = cv.VideoCapture(cap_device)
-    cap.set(cv.CAP_PROP_FRAME_WIDTH, cap_width)
-    cap.set(cv.CAP_PROP_FRAME_HEIGHT, cap_height)
+    cap = cv.VideoCapture(args.device)
+    cap.set(cv.CAP_PROP_FRAME_WIDTH, args.width)
+    cap.set(cv.CAP_PROP_FRAME_HEIGHT, args.height)
 
     mp_hands = mp.solutions.hands
-    hands = mp_hands.Hands (
-        static_image_mode=use_static_image_mode,
+    hands = mp_hands.Hands(
+        static_image_mode=args.use_static_image_mode,
         max_num_hands=2,
-        min_detection_confidence=min_detection_confidence,
-        min_tracking_confidence=min_tracking_confidence,
+        min_detection_confidence=args.min_detection_confidence,
+        min_tracking_confidence=args.min_tracking_confidence,
     )
 
     keypoint_classifier = KeyPointClassifier()
     point_history_classifier = PointHistoryClassifier()
 
-    with open('model/keypoint_classifier/keypoint_classifier_label.csv',
-              encoding='utf-8-sig') as f:
-        keypoint_classifier_labels = csv.reader(f)
-        keypoint_classifier_labels = [
-            row[0] for row in keypoint_classifier_labels
-        ]
+    # Лабел унших хэсэг
+    with open('model/keypoint_classifier/keypoint_classifier_label.csv', encoding='utf-8-sig') as f:
+        keypoint_classifier_labels = [row[0] for row in csv.reader(f)]
     with open('model/point_history_classifier/point_history_classifier_label.csv', encoding='utf-8-sig') as f:
-        point_history_classifier_labels = csv.reader(f)
-        point_history_classifier_labels = [
-            row[0] for row in point_history_classifier_labels
-        ]
-
+        point_history_classifier_labels = [row[0] for row in csv.reader(f)]
 
     history_length = 16
-    point_history = {
-        'Left': deque(maxlen=history_length),
-        'Right': deque(maxlen=history_length),
-    }
-    finger_gesture_history = {
-        'Left': deque(maxlen=history_length),
-        'Right': deque(maxlen=history_length),
-    }
+    point_history = {'Left': deque(maxlen=history_length), 'Right': deque(maxlen=history_length)}
+    finger_gesture_history = {'Left': deque(maxlen=history_length), 'Right': deque(maxlen=history_length)}
 
     draw_canvas = None
     previous_draw_points = {'Left': None, 'Right': None}
@@ -88,13 +56,10 @@ def main():
     eraser_radius = 35
 
     while True:
-
         key = cv.waitKey(10)
-        if key == 27:
-            break
+        if key == 27: break
         ret, image = cap.read()
-        if not ret:
-            break
+        if not ret: break
 
         image = cv.flip(image, 1)
         debug_image = copy.deepcopy(image)
@@ -102,15 +67,15 @@ def main():
         if draw_canvas is None or draw_canvas.shape[:2] != debug_image.shape[:2]:
             draw_canvas = np.zeros(debug_image.shape[:2], dtype=np.uint8)
 
-        eraser_centers = []
         image = cv.cvtColor(image, cv.COLOR_BGR2RGB)
         image.flags.writeable = False
         results = hands.process(image)
         image.flags.writeable = True
 
+        eraser_centers = []
+
         if results.multi_hand_landmarks is not None:
-            for hand_landmarks, handedness in zip(results.multi_hand_landmarks,
-                                                  results.multi_handedness):
+            for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
                 hand_label = handedness.classification[0].label
                 if hand_label not in point_history:
                     point_history[hand_label] = deque(maxlen=history_length)
@@ -119,23 +84,32 @@ def main():
 
                 brect = calc_bounding_rect(debug_image, hand_landmarks)
                 landmark_list = calc_landmark_list(debug_image, hand_landmarks)
-                pre_processed_landmark_list = pre_process_landmark(
-                    landmark_list)
-                pre_processed_point_history_list = pre_process_point_history(
-                    debug_image, point_history[hand_label])
+                pre_processed_landmark_list = pre_process_landmark(landmark_list)
+                pre_processed_point_history_list = pre_process_point_history(debug_image, point_history[hand_label])
+                
+                # МОДЕЛ ТАНИХ ХЭСЭГ
                 hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
-                hand_sign_text = keypoint_classifier_labels[hand_sign_id]
+                
+                # --- IndexError-оос сэргийлэх засалт ---
+                if hand_sign_id < len(keypoint_classifier_labels):
+                    hand_sign_text = keypoint_classifier_labels[hand_sign_id]
+                else:
+                    hand_sign_text = "Unknown"
+                # --------------------------------------
+
                 active_finger_name, active_finger_tip = detect_active_finger(landmark_list)
 
-                if hand_sign_text == 'Pointer' and active_finger_tip is not None:
+                # --- ЛОГИК ЗАСАЛТ: Шинэ 10 нэрээрээ шалгах ---
+                # 'Index' гэсэн дохио танигдвал зурна
+                if hand_sign_text == 'Index' and active_finger_tip is not None:
                     point_history[hand_label].append(active_finger_tip)
                     previous_point = previous_draw_points[hand_label]
                     if previous_point is not None:
-                        cv.line(draw_canvas, tuple(previous_point),
-                                tuple(active_finger_tip), 255, brush_thickness)
+                        cv.line(draw_canvas, tuple(previous_point), tuple(active_finger_tip), 255, brush_thickness)
                     previous_draw_points[hand_label] = active_finger_tip
 
-                elif hand_sign_text == 'Close':
+                # 'Fist' гэсэн дохио танигдвал арчина
+                elif hand_sign_text == 'Fist':
                     eraser_center = landmark_list[8]
                     cv.circle(draw_canvas, tuple(eraser_center), eraser_radius, 0, -1)
                     eraser_centers.append(tuple(eraser_center))
@@ -146,23 +120,16 @@ def main():
                     point_history[hand_label].append([0, 0])
                     previous_draw_points[hand_label] = None
 
+                # Бусад хэсэг хэвээрээ (History болон Drawing)
                 finger_gesture_id = 0
                 point_history_len = len(pre_processed_point_history_list)
-
                 if point_history_len == (history_length * 2):
-                    finger_gesture_id = point_history_classifier(
-                        pre_processed_point_history_list)
-
+                    finger_gesture_id = point_history_classifier(pre_processed_point_history_list)
                 finger_gesture_history[hand_label].append(finger_gesture_id)
                 
+                # Чиний үндсэн дизайн: Landmark зурах
                 debug_image = draw_landmarks(debug_image, landmark_list)
-                debug_image = draw_info_text(
-                    debug_image,
-                    brect,
-                    handedness,
-                    hand_sign_text,
-                    active_finger_name,
-                )
+                debug_image = draw_info_text(debug_image, brect, handedness, hand_sign_text, active_finger_name)
         else:
             for hand_label in point_history.keys():
                 point_history[hand_label].append([0, 0])
@@ -459,7 +426,6 @@ def detect_active_finger(landmark_point):
         'Middle': 12,
         'Ring': 16,
         'Little': 20,
-        'All': 8,
     }
 
     wrist_x, wrist_y = landmark_point[0]
