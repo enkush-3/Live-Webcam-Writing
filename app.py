@@ -9,10 +9,8 @@ import cv2 as cv
 import numpy as np
 import mediapipe as mp
 
-from model import KeyPointClassifier
-from model import PointHistoryClassifier
+from keypoint_classifier import KeyPointClassifier
 
-# [ЭНД ГАР ХҮРЭХГҮЙ] - Хуучин функцууд хэвээрээ
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=int, default=0)
@@ -38,13 +36,7 @@ def main():
     )
 
     keypoint_classifier = KeyPointClassifier()
-    point_history_classifier = PointHistoryClassifier()
-
-    # Лабел унших хэсэг
-    with open('model/keypoint_classifier/keypoint_classifier_label.csv', encoding='utf-8-sig') as f:
-        keypoint_classifier_labels = [row[0] for row in csv.reader(f)]
-    with open('model/point_history_classifier/point_history_classifier_label.csv', encoding='utf-8-sig') as f:
-        point_history_classifier_labels = [row[0] for row in csv.reader(f)]
+    keypoint_classifier_labels = ['Palm', 'L', 'Fist', 'Fist_Moved', 'Thumb', 'Index', 'OK', 'Palm_Moved', 'C', 'Down']
 
     history_length = 16
     point_history = {'Left': deque(maxlen=history_length), 'Right': deque(maxlen=history_length)}
@@ -85,22 +77,17 @@ def main():
                 brect = calc_bounding_rect(debug_image, hand_landmarks)
                 landmark_list = calc_landmark_list(debug_image, hand_landmarks)
                 pre_processed_landmark_list = pre_process_landmark(landmark_list)
-                pre_processed_point_history_list = pre_process_point_history(debug_image, point_history[hand_label])
                 
-                # МОДЕЛ ТАНИХ ХЭСЭГ
+                
                 hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
                 
-                # --- IndexError-оос сэргийлэх засалт ---
                 if hand_sign_id < len(keypoint_classifier_labels):
                     hand_sign_text = keypoint_classifier_labels[hand_sign_id]
                 else:
                     hand_sign_text = "Unknown"
-                # --------------------------------------
 
                 active_finger_name, active_finger_tip = detect_active_finger(landmark_list)
 
-                # --- ЛОГИК ЗАСАЛТ: Шинэ 10 нэрээрээ шалгах ---
-                # 'Index' гэсэн дохио танигдвал зурна
                 if hand_sign_text == 'Index' and active_finger_tip is not None:
                     point_history[hand_label].append(active_finger_tip)
                     previous_point = previous_draw_points[hand_label]
@@ -108,7 +95,6 @@ def main():
                         cv.line(draw_canvas, tuple(previous_point), tuple(active_finger_tip), 255, brush_thickness)
                     previous_draw_points[hand_label] = active_finger_tip
 
-                # 'Fist' гэсэн дохио танигдвал арчина
                 elif hand_sign_text == 'Fist':
                     eraser_center = landmark_list[8]
                     cv.circle(draw_canvas, tuple(eraser_center), eraser_radius, 0, -1)
@@ -119,15 +105,7 @@ def main():
                 else:
                     point_history[hand_label].append([0, 0])
                     previous_draw_points[hand_label] = None
-
-                # Бусад хэсэг хэвээрээ (History болон Drawing)
-                finger_gesture_id = 0
-                point_history_len = len(pre_processed_point_history_list)
-                if point_history_len == (history_length * 2):
-                    finger_gesture_id = point_history_classifier(pre_processed_point_history_list)
-                finger_gesture_history[hand_label].append(finger_gesture_id)
                 
-                # Чиний үндсэн дизайн: Landmark зурах
                 debug_image = draw_landmarks(debug_image, landmark_list)
                 debug_image = draw_info_text(debug_image, brect, handedness, hand_sign_text, active_finger_name)
         else:
@@ -393,7 +371,6 @@ def draw_bounding_rect(use_brect, image, brect):
     if use_brect:
         cv.rectangle(image, (brect[0], brect[1]), (brect[2], brect[3]),
                      (0, 0, 0), 1)
-
     return image
 
 
@@ -414,7 +391,6 @@ def draw_info_text(image, brect, handedness, hand_sign_text,
                    cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1,
                    cv.LINE_AA)
     return image
-
 
 def detect_active_finger(landmark_point):
     if len(landmark_point) <= 20:
@@ -455,8 +431,10 @@ def draw_point_history(image, point_history):
         if point[0] != 0 and point[1] != 0:
             cv.circle(image, (point[0], point[1]), 1 + int(index / 2),
                       (152, 251, 152), 2)
-
     return image
 
 if __name__ == '__main__':
     main()
+
+
+# Command to run: python app.py
